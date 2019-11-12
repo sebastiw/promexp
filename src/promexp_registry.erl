@@ -30,10 +30,18 @@
            }).
 
 -define(DEFAULT_EXTRACT_FUN,
-        fun (M, CollectMap) ->
-                MMap = maps:get(M, CollectMap, #{}),
-                Labels = get_labels(M),
-                maps:get(Labels, MMap, 0)
+        fun (M, CollectMap) when is_map(CollectMap) ->
+                case maps:get(M, CollectMap, undefined) of
+                    V when is_number(V) ->
+                        V;
+                    Map when is_map(Map) ->
+                        maps:to_list(Map);
+                    undefined ->
+                        undefined
+                end;
+            (_M, Else) ->
+                logger:error({promexp_collect_is_not_map, Else}),
+                undefined
         end).
 
 start_link() ->
