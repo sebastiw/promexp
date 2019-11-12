@@ -56,9 +56,6 @@ register_metrics(CollectFun, ExtractFun, Metrics) ->
 collect() ->
     gen_server:call(?MODULE, collect).
 
-get_labels(MetricName) ->
-    gen_server:call(?MODULE, {get_labels, MetricName}).
-
 init(_) ->
     erlang:process_flag(trap_exit, true),
     {ok, #s{}}.
@@ -71,18 +68,11 @@ handle_call({register, CollectFun, ExtractFun, Metrics}, _, State) ->
             {Reply, NewState} = add_metrics(State, CollectFun, ExtractFun, Ms),
             {reply, Reply, NewState}
     end;
-handle_call(collect, From, State) ->
+handle_call(collect, _, State) ->
     Extractors = maps:from_list(State#s.extractors),
-    _Pid = spawn_link(
-            fun () ->
-                    Cs = collect_all(State#s.collectors),
-                    Res = extract_all(State#s.metrics, Extractors, Cs),
-                    gen_server:reply(From, Res)
-            end),
-    {no_reply, State};
-handle_call({get_labels, MetricName}, _, State) ->
-    M = lists:keyfind(MetricName, #metric.name, State#s.metrics),
-    {reply, M#metric.labels, State}.
+    Cs = collect_all(State#s.collectors),
+    Res = extract_all(State#s.metrics, Extractors, Cs),
+    {reply, Res, State}.
 
 handle_cast(_What, State) ->
     {noreply, State}.
@@ -179,10 +169,11 @@ extract_all(Metrics, Extractors, CollectedResults) ->
     lists:map(fun (M) ->
                       ColRes = maps:get(M#metric.collect_fun, CollectedResults),
                       ExtFun = maps:get(M#metric.extract_fun, Extractors),
+                      %% TODO: Add prometheus_model_helper:type_metrics
                       extract_data(M, ExtFun, ColRes)
               end,
               Metrics).
 
 extract_data(Metric, ExtractFun, Result) ->
     %% TODO: Catch failures
-    ExtractFun(Metric#metric.name, Result).
+    {Metric, ExtractFun(Metric#metric.name, Result)}.
