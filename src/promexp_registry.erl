@@ -81,7 +81,7 @@ add_metrics(State0, CollectFun, ExtractFun, Metrics) ->
     {CRef, State1} = add_collector(State0, CollectFun),
     {ERef, State2} = add_extractor(State1, ExtractFun),
     {L, NewState} = do_add_metrics(State2, CRef, ERef, Metrics),
-    case lists:filter(fun (ok) -> false; (E) -> {true, E} end, L) of
+    case lists:filtermap(fun (ok) -> false; (E) -> {true, E} end, L) of
         [] ->
             {ok, NewState};
         Errors ->
@@ -119,10 +119,10 @@ try_add_metric(M, State) ->
     case lists:keyfind(M#metric.name, #metric.name, State#s.metrics) of
         false ->
             {ok, State#s{metrics = [M|State#s.metrics]}};
-        M ->
+        M ->                                    % Exact same
             {ok, State};
-        Else ->
-            {{promexp_already_added, M, Else}, State}
+        Else ->                                 % Something differs
+            {{promexp_added_with_different_values, M, Else}, State}
     end.
 
 convert_metrics([], _, _) ->
