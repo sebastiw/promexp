@@ -60,6 +60,7 @@ get_labels(MetricName) ->
     gen_server:call(?MODULE, {get_labels, MetricName}).
 
 init(_) ->
+    erlang:process_flag(trap_exit, true),
     {ok, #s{}}.
 
 handle_call({register, CollectFun, ExtractFun, Metrics}, _, State) ->
