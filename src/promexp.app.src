@@ -1,0 +1,10 @@
+{application, promexp,
+ [{description, "Prometheus exporter"},
+  {vsn, "0.0.0"},
+  {mod, {promexp_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    prometheus,
+    cowboy
+   ]}]}.
