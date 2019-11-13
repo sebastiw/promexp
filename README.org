@@ -1,0 +1,45 @@
+* Promexp
+
+Prometheus exporter
+
+* Usage
+
+#+BEGIN_SRC erlang
+  1> ACounter = #{ type => counter
+                 , name => a_counter_name
+                 , help => "Some help for a_counter_name"
+                 , labels => []}.
+
+  %% CollectFun should return a data structure that have all the current
+  %% values of the metrics
+  2> CollectFun = fun () ->
+                          #{a_counter_name => 2}
+                  end.
+
+  %% ExtractFun takes the name of the metric and a data structure and
+  %% returns the value for the metric.
+  %% If the CollectFun returns a map structure like:
+  %%   #{ metric1 => 5
+  %%    , metric2 => #{[label1, label2] => 42}
+  %%    , metric3 => #{{label3, label4} => 13}}
+  %% Then the default ExtractFun can be used (and does not need to be
+  %% registered). (In this example it is going to be called as
+  %%   ExtractFun(a_counter_name, #{a_counter_name => 2})).
+  3> ExtractFun = fun maps:get/2.
+
+  %% First declare the metrics
+  4> promexp:declare([ACounter]).
+
+  %% Then register functions for collecting and extracting values for
+  %% the metrics
+  5> promexp:register(CollectFun, ExtractFun, [ACounter]).
+
+  %% Collect the metrics
+  6> promexp:collect().
+  #{metric1 => #{[] => 3},
+    metric2 => #{[first, second] => 5}
+   }.
+
+  %% OR...
+  7> httpc:request("http://localhost:8081/metrics").
+#+END_SRC
