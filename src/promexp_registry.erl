@@ -6,6 +6,8 @@
         , register_metrics/2
         , register_metrics/3
         , collect/0
+        , extract_one/2
+        , deregister_all/0
         ]).
 
 -export([ init/1
@@ -33,7 +35,7 @@
         fun (M, CollectMap) when is_map(CollectMap) ->
                 case maps:get(M, CollectMap, undefined) of
                     V when is_number(V) ->
-                        V;
+                        #{[] => V};
                     Map when is_map(Map) ->
                         maps:to_list(Map);
                     undefined ->
@@ -56,6 +58,12 @@ register_metrics(CollectFun, ExtractFun, Metrics) ->
 collect() ->
     gen_server:call(?MODULE, collect).
 
+extract_one(MetricName, CollectedData) ->
+    gen_server:call(?MODULE, {extract_one, MetricName, CollectedData}).
+
+deregister_all() ->
+    gen_server:call(?MODULE, deregister_all).
+
 init(_) ->
     erlang:process_flag(trap_exit, true),
     {ok, #s{}}.
@@ -69,10 +77,26 @@ handle_call({register, CollectFun, ExtractFun, Metrics}, _, State) ->
             {reply, Reply, NewState}
     end;
 handle_call(collect, _, State) ->
+    Cs = collect_all(State#s.collectors),
+    {reply, Cs, State};
+handle_call(collect_and_extract, _, State) ->
     Extractors = maps:from_list(State#s.extractors),
     Cs = collect_all(State#s.collectors),
     Res = extract_all(State#s.metrics, Extractors, Cs),
-    {reply, Res, State}.
+    {reply, Res, State};
+handle_call({extract_one, MetricName, CollectData}, _, State) ->
+    case lists:keyfind(MetricName, #metric.name, State#s.metrics) of
+        false ->
+            logger:error({promexp_not_declared, MetricName}),
+            {reply, undefined, State};
+        Metric ->
+            Extractors = maps:from_list(State#s.extractors),
+            Res = extract_one(Metric, Extractors, CollectData),
+            {reply, Res, State}
+    end;
+handle_call(deregister_all, _, _) ->
+    %% TODO: Also deregister from prometheus?
+    {reply, ok, #s{}}.
 
 handle_cast(_What, State) ->
     {noreply, State}.
@@ -92,8 +116,7 @@ add_collector(State, CollectFun) ->
     case lists:keyfind(CollectFun, 2, State#s.collectors) of
         false ->
             R = make_ref(),
-            NewState = State#s{collectors = [{R, CollectFun}|State#s.collectors]},
-            {R, NewState};
+            {R, State#s{collectors = [{R, CollectFun}|State#s.collectors]}};
         {R, _} ->
             {R, State}
     end.
@@ -167,13 +190,27 @@ collect_data(Fun) ->
 
 extract_all(Metrics, Extractors, CollectedResults) ->
     lists:map(fun (M) ->
-                      ColRes = maps:get(M#metric.collect_fun, CollectedResults),
-                      ExtFun = maps:get(M#metric.extract_fun, Extractors),
-                      %% TODO: Add prometheus_model_helper:type_metrics
-                      extract_data(M, ExtFun, ColRes)
+                      extract_one(M, Extractors, CollectedResults)
               end,
               Metrics).
 
+extract_one(M, Extractors, CollectedResults) ->
+    ColRes = maps:get(M#metric.collect_fun, CollectedResults),
+    ExtFun = maps:get(M#metric.extract_fun, Extractors),
+    %% TODO: Add prometheus_model_helper:type_metrics
+    extract_data(M, ExtFun, ColRes).
+
 extract_data(Metric, ExtractFun, Result) ->
-    %% TODO: Catch failures
-    {Metric, ExtractFun(Metric#metric.name, Result)}.
+    try
+        ValueMap = ExtractFun(Metric#metric.name, Result),
+        [{zip_labels(Metric#metric.labels, Labels), V}
+         || {Labels, V} <- maps:to_list(ValueMap)]
+    catch
+        E:R:S ->
+            logger:error({promexp_extract_failed, E, R, S})
+    end.
+
+zip_labels(LabelNames, Labels) when is_tuple(Labels) ->
+    zip_labels(LabelNames, tuple_to_list(Labels));
+zip_labels(LabelNames, Labels) when is_list(Labels) ->
+    lists:zip(LabelNames, Labels).
